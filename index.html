@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PEM Electrolyzer - MPC Dashboard</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        /* === DARK THEME CSS === */
+        :root {
+            --primary: #bb86fc; --secondary: #03dac6; --success: #4caf50;
+            --warning: #ff9800; --danger: #cf6679; --bg: #121212;
+            --surface: #1e1e1e; --card: #2d2d2d; --text: #e1e1e1;
+            --text2: #a0a0a0; --border: #333; --radius: 8px;
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', sans-serif; 
+            background: var(--bg); color: var(--text);
+            min-height: 100vh; line-height: 1.5;
+        }
+        
+        .dashboard-container { min-height: 100vh; display: flex; flex-direction: column; }
+        
+        /* Header */
+        .dashboard-header {
+            background: var(--surface); padding: 1rem 2rem;
+            display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 3px solid var(--secondary); flex-shrink: 0;
+        }
+        .header-left h1 { color: var(--primary); font-size: 1.8rem; }
+        .subtitle { color: var(--text2); font-size: 0.9rem; }
+        
+        .status-indicators { display: flex; gap: 1.5rem; }
+        .status-item { display: flex; align-items: center; gap: 0.5rem; }
+        .status-value { 
+            padding: 0.25rem 0.5rem; border-radius: 4px; 
+            background: var(--card); font-weight: 600;
+        }
+        .status-value.connected { background: var(--success); color: white; }
+        .status-value.disconnected { background: var(--danger); color: white; }
+        
+        /* Main Content */
+        .dashboard-main {
+            flex: 1; display: grid; grid-template-columns: 1fr 400px;
+            gap: 1.5rem; padding: 1.5rem; min-height: 0; overflow: hidden;
+        }
+        
+        .panel {
+            background: var(--surface); border-radius: var(--radius);
+            padding: 1.5rem; border: 1px solid var(--border);
+            min-height: 0; overflow: auto;
+        }
+        
+        .panel h2 { 
+            color: var(--primary); margin-bottom: 1.5rem; 
+            border-bottom: 2px solid var(--border); padding-bottom: 0.5rem;
+        }
+        
+        /* Metrics */
+        .metrics-grid { 
+            display: grid; grid-template-columns: repeat(2, 1fr); 
+            gap: 1rem; margin-bottom: 1.5rem;
+        }
+        .metric-card {
+            background: var(--card); padding: 1.5rem; border-radius: var(--radius);
+            border-left: 4px solid var(--secondary);
+        }
+        .metric-value { font-size: 2rem; font-weight: bold; margin-bottom: 0.5rem; }
+        .metric-label { color: var(--text2); font-size: 0.9rem; }
+        
+        /* Charts */
+        .charts-container { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
+        .chart-wrapper { 
+            background: var(--card); padding: 1.5rem; 
+            border-radius: var(--radius); min-height: 300px;
+        }
+        
+        /* Controls */
+        .control-section { margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid var(--border); }
+        .mode-selector { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+        .mode-btn {
+            flex: 1; padding: 0.75rem 1rem; border: 2px solid var(--border);
+            background: var(--card); color: var(--text2); border-radius: var(--radius);
+            cursor: pointer; font-weight: 600; min-width: 120px;
+        }
+        .mode-btn.active { background: var(--secondary); color: var(--bg); border-color: var(--secondary); }
+        
+        .param-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 1rem; }
+        .param-item input {
+            padding: 0.75rem; border: 2px solid var(--border); border-radius: var(--radius);
+            background: var(--card); color: var(--text); width: 100%;
+        }
+        
+        .btn-primary, .btn-success, .btn-danger {
+            padding: 0.75rem 1.5rem; border: none; border-radius: var(--radius);
+            font-weight: 600; cursor: pointer; width: 100%; margin-bottom: 0.5rem;
+            display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+        }
+        .btn-primary { background: var(--secondary); color: var(--bg); }
+        .btn-success { background: var(--success); color: white; }
+        .btn-danger { background: var(--danger); color: white; }
+        
+        /* Comparison */
+        .comparison-grid { display: grid; grid-template-columns: 1fr auto auto auto auto; gap: 0.5rem; font-size: 0.9rem; }
+        .comparison-header { font-weight: bold; color: var(--primary); padding: 0.75rem; background: var(--card); text-align: center; }
+        .strategy-name, .metric-value { padding: 0.75rem; background: var(--card); margin-bottom: 0.5rem; }
+        .strategy-name { font-weight: 600; text-align: left; background: var(--surface); }
+        
+        /* Real World Data Panel */
+        .external-data-panel { background: var(--card); padding: 15px; border-radius: var(--radius); margin-bottom: 20px; }
+        .external-data-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 10px; }
+        .data-item { padding: 8px; background: var(--surface); border-radius: 4px; }
+        .data-item label { font-size: 0.8em; color: var(--text2); font-weight: bold; }
+        
+        .tariff-display { padding: 5px; border-radius: 4px; text-align: center; font-weight: bold; color: white; }
+        .tariff-display.offPeak { background: var(--success); }
+        .tariff-display.standard { background: var(--warning); }
+        .tariff-display.peak { background: var(--danger); }
+        
+        .emergency { background: var(--danger); color: white; padding: 4px 8px; border-radius: 4px; animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0.7; } }
+        
+        /* Footer */
+        .dashboard-footer { background: var(--surface); color: var(--text2); padding: 1rem 2rem; text-align: center; flex-shrink: 0; }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .dashboard-main { grid-template-columns: 1fr; }
+            .metrics-grid { grid-template-columns: 1fr; }
+            .external-data-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <header class="dashboard-header">
+            <div class="header-left">
+                <h1><i class="fas fa-water"></i> PEM Electrolyzer Control</h1>
+                <p class="subtitle">Real-time MPC Dashboard</p>
+            </div>
+            <div class="header-right">
+                <div class="status-indicators">
+                    <div class="status-item" id="mqtt-status">
+                        <i class="fas fa-satellite-dish"></i>
+                        <span>MQTT: <span class="status-value">Disconnected</span></span>
+                    </div>
+                    <div class="status-item" id="matlab-status">
+                        <i class="fas fa-cog"></i>
+                        <span>MATLAB: <span class="status-value">Offline</span></span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="dashboard-main">
+            <!-- System Overview -->
+            <section class="panel system-overview">
+                <h2><i class="fas fa-tachometer-alt"></i> System Overview</h2>
+                
+                <!-- Real World Data -->
+                <div class="external-data-panel">
+                    <h3><i class="fas fa-globe-africa"></i> Real-World Context</h3>
+                    <div class="external-data-grid">
+                        <div class="data-item">
+                            <label>Electricity Tariff</label>
+                            <div id="current-tariff">Loading...</div>
+                        </div>
+                        <div class="data-item">
+                            <label>Solar Forecast</label>
+                            <div id="solar-forecast">Loading...</div>
+                        </div>
+                        <div class="data-item">
+                            <label>O₂ Demand (KNH)</label>
+                            <div id="o2-demand">Loading...</div>
+                        </div>
+                        <div class="data-item">
+                            <label>Neural MPC</label>
+                            <div id="neural-mpc-decision">Ready...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-value" id="h2-production">0.0</div>
+                        <div class="metric-label">H₂ Production (L/h)</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="o2-production">0.0</div>
+                        <div class="metric-label">O₂ Production (L/h)</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="stack-current">0.0</div>
+                        <div class="metric-label">Stack Current (A)</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="stack-temperature">0.0</div>
+                        <div class="metric-label">Stack Temperature (°C)</div>
+                    </div>
+                </div>
+
+                <div class="charts-container">
+                    <div class="chart-wrapper">
+                        <h3>Production Rates</h3>
+                        <canvas id="production-chart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- MPC Control -->
+            <section class="panel mpc-control">
+                <h2><i class="fas fa-brain"></i> MPC Control</h2>
+                
+                <div class="control-section">
+                    <h3>Control Mode</h3>
+                    <div class="mode-selector">
+                        <button class="mode-btn active" data-mode="HEMPC">HE-MPC</button>
+                        <button class="mode-btn" data-mode="DETERMINISTIC">Deterministic</button>
+                        <button class="mode-btn" data-mode="STOCHASTIC">Stochastic</button>
+                        <button class="mode-btn" data-mode="MANUAL">Manual</button>
+                    </div>
+                </div>
+
+                <div class="control-section">
+                    <h3>MPC Parameters</h3>
+                    <div class="param-grid">
+                        <div class="param-item">
+                            <label>Horizon</label>
+                            <input type="number" id="horizon-length" value="10" min="5" max="50">
+                        </div>
+                        <div class="param-item">
+                            <label>Sample Time (s)</label>
+                            <input type="number" id="sample-time" value="0.1" step="0.1">
+                        </div>
+                    </div>
+                    <button class="btn-primary" id="apply-params">
+                        <i class="fas fa-play"></i> Apply Parameters
+                    </button>
+                </div>
+
+                <div class="control-section">
+                    <h3>Manual Control</h3>
+                    <div class="manual-controls">
+                        <div class="slider-control">
+                            <label>Production Setpoint: <span id="slider-value">50%</span></label>
+                            <input type="range" id="production-slider" min="0" max="100" value="50" class="slider">
+                        </div>
+                        <div class="control-buttons">
+                            <button class="btn-success" id="start-system">
+                                <i class="fas fa-play"></i> Start System
+                            </button>
+                            <button class="btn-danger" id="stop-system">
+                                <i class="fas fa-stop"></i> Stop System
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="dashboard-footer">
+            <div class="footer-info">
+                <span>PEM Electrolyzer Control System | HE-MPC Research</span>
+                <span id="last-update">Last update: Never</span>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // ================= ALL JAVASCRIPT IN ONE FILE =================
+        class MQTTClient {
+            constructor() {
+                this.socket = io();
+                this.isConnected = false;
+                this.init();
+            }
+
+            init() {
+                this.socket.on('connect', () => {
+                    this.isConnected = true;
+                    this.updateStatus('mqtt-status', 'Connected', true);
+                    this.showNotification('Connected to server', 'success');
+                });
+
+                this.socket.on('disconnect', () => {
+                    this.isConnected = false;
+                    this.updateStatus('mqtt-status', 'Disconnected', false);
+                });
+
+                this.socket.on('matlab-update', (data) => {
+                    this.handleMatlabData(data);
+                });
+
+                this.socket.on('arduino-update', (data) => {
+                    this.handleArduinoData(data);
+                });
+
+                this.setupEventListeners();
+            }
+
+            handleMatlabData(data) {
+                // Update dashboard
+                if (data.h2ProductionRate !== undefined) {
+                    document.getElementById('h2-production').textContent = (data.h2ProductionRate * 3600).toFixed(1);
+                }
+                if (data.o2ProductionRate !== undefined) {
+                    document.getElementById('o2-production').textContent = (data.o2ProductionRate * 3600).toFixed(1);
+                }
+                if (data.stackCurrent !== undefined) {
+                    document.getElementById('stack-current').textContent = data.stackCurrent.toFixed(1);
+                }
+                if (data.cellTemperature !== undefined) {
+                    document.getElementById('stack-temperature').textContent = data.cellTemperature.toFixed(1);
+                }
+
+                this.updateLastUpdateTime();
+            }
+
+            handleArduinoData(data) {
+                this.updateStatus('matlab-status', 'Connected', true);
+                
+                if (data.prodRateSet !== undefined) {
+                    const slider = document.getElementById('production-slider');
+                    const valueDisplay = document.getElementById('slider-value');
+                    if (slider) slider.value = data.prodRateSet;
+                    if (valueDisplay) valueDisplay.textContent = `${data.prodRateSet}%`;
+                }
+            }
+
+            updateStatus(elementId, text, connected) {
+                const element = document.querySelector(`#${elementId} .status-value`);
+                if (element) {
+                    element.textContent = text;
+                    element.className = `status-value ${connected ? 'connected' : 'disconnected'}`;
+                }
+            }
+
+            updateLastUpdateTime() {
+                const element = document.getElementById('last-update');
+                if (element) {
+                    element.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+                }
+            }
+
+            sendControlCommand(command) {
+                if (this.isConnected) {
+                    this.socket.emit('control-command', command);
+                }
+            }
+
+            showNotification(message, type) {
+                console.log(`${type.toUpperCase()}: ${message}`);
+            }
+
+            setupEventListeners() {
+                // System control
+                document.getElementById('start-system').addEventListener('click', () => {
+                    this.sendControlCommand({
+                        destination: 'arduino',
+                        type: 'system_command',
+                        command: 'START'
+                    });
+                });
+
+                document.getElementById('stop-system').addEventListener('click', () => {
+                    this.sendControlCommand({
+                        destination: 'arduino',
+                        type: 'system_command', 
+                        command: 'STOP'
+                    });
+                });
+
+                // Production slider
+                const slider = document.getElementById('production-slider');
+                const valueDisplay = document.getElementById('slider-value');
+                
+                slider.addEventListener('input', (e) => {
+                    valueDisplay.textContent = `${e.target.value}%`;
+                });
+
+                slider.addEventListener('change', (e) => {
+                    this.sendControlCommand({
+                        destination: 'arduino',
+                        type: 'setpoint',
+                        prodRate: parseInt(e.target.value)
+                    });
+                });
+
+                // MPC mode buttons
+                document.querySelectorAll('.mode-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+                        e.target.classList.add('active');
+                        
+                        this.sendControlCommand({
+                            destination: 'arduino',
+                            type: 'mode_change',
+                            mode: e.target.dataset.mode
+                        });
+                    });
+                });
+
+                // MPC parameters
+                document.getElementById('apply-params').addEventListener('click', () => {
+                    const horizon = document.getElementById('horizon-length').value;
+                    const sampleTime = document.getElementById('sample-time').value;
+                    
+                    this.socket.emit('mpc-config', {
+                        horizon: parseInt(horizon),
+                        sampleTime: parseFloat(sampleTime)
+                    });
+                    
+                    this.showNotification('MPC parameters updated', 'success');
+                });
+            }
+        }
+
+        class NeuralMPC {
+            constructor() {
+                this.dataSources = {
+                    external: {
+                        kplcTariffs: null,
+                        currentTariff: null,
+                        currentSolar: null,
+                        currentO2Demand: null
+                    }
+                };
+                this.init();
+            }
+
+            async init() {
+                await this.loadRealWorldData();
+                this.startRealTimeUpdates();
+                console.log('✅ Neural MPC initialized');
+            }
+
+            async loadRealWorldData() {
+                // KPLC Tariffs
+                this.dataSources.external.kplcTariffs = {
+                    offPeak: { hours: [0,1,2,3,4,5,22,23], rate: 8.50, description: "Off-Peak" },
+                    standard: { hours: [6,7,8,9,16,17,18,19,20,21], rate: 12.50, description: "Standard" },
+                    peak: { hours: [10,11,12,13,14,15], rate: 21.68, description: "Peak" }
+                };
+                this.updateCurrentTariff();
+                this.updateSolarData();
+                this.updateO2Demand();
+                this.updateDashboard();
+            }
+
+            updateCurrentTariff() {
+                const hour = new Date().getHours();
+                const tariffs = this.dataSources.external.kplcTariffs;
+                
+                let type = 'standard';
+                if (tariffs.offPeak.hours.includes(hour)) type = 'offPeak';
+                else if (tariffs.peak.hours.includes(hour)) type = 'peak';
+                
+                this.dataSources.external.currentTariff = {
+                    type: type,
+                    rate: tariffs[type].rate,
+                    description: tariffs[type].description
+                };
+            }
+
+            updateSolarData() {
+                const hour = new Date().getHours();
+                let irradiance = 0;
+                if (hour >= 6 && hour <= 18) {
+                    const distanceFromPeak = Math.abs(hour - 12);
+                    irradiance = Math.max(0, 600 * (1 - distanceFromPeak / 6));
+                }
+                
+                this.dataSources.external.currentSolar = {
+                    irradiance: irradiance,
+                    timestamp: new Date().toISOString()
+                };
+            }
+
+            updateO2Demand() {
+                const hour = new Date().getHours();
+                let demand = 120; // baseline
+                
+                if (hour >= 6 && hour < 12) demand = 150;
+                else if (hour >= 12 && hour < 18) demand = 140;
+                else if (hour >= 18) demand = 100;
+                
+                // 10% chance of emergency
+                if (Math.random() < 0.1) demand *= 2.5;
+                
+                this.dataSources.external.currentO2Demand = {
+                    demand: Math.round(demand),
+                    isEmergency: demand > 180,
+                    timestamp: new Date().toISOString()
+                };
+            }
+
+            updateDashboard() {
+                const tariff = this.dataSources.external.currentTariff;
+                const solar = this.dataSources.external.currentSolar;
+                const demand = this.dataSources.external.currentO2Demand;
+
+                // Update tariff display
+                document.getElementById('current-tariff').innerHTML = `
+                    <div class="tariff-display ${tariff.type}">
+                        <strong>${tariff.description}</strong>
+                        <div>KSh ${tariff.rate}/kWh</div>
+                    </div>
+                `;
+
+                // Update solar display
+                document.getElementById('solar-forecast').innerHTML = `
+                    <div>${solar.irradiance.toFixed(0)} W/m²</div>
+                `;
+
+                // Update demand display
+                document.getElementById('o2-demand').innerHTML = `
+                    <div class="${demand.isEmergency ? 'emergency' : ''}">
+                        ${demand.demand} L/min
+                        ${demand.isEmergency ? '🚨' : ''}
+                    </div>
+                `;
+
+                // Update Neural MPC status
+                document.getElementById('neural-mpc-decision').innerHTML = `
+                    <div>Active - Context Aware</div>
+                    <div style="font-size:0.8em;opacity:0.8">Using real-world data</div>
+                `;
+            }
+
+            startRealTimeUpdates() {
+                setInterval(() => {
+                    this.updateCurrentTariff();
+                    this.updateSolarData();
+                    this.updateO2Demand();
+                    this.updateDashboard();
+                }, 30000);
+            }
+        }
+
+        class ChartManager {
+            constructor() {
+                this.charts = {};
+                this.init();
+            }
+
+            init() {
+                this.createProductionChart();
+                this.startDataSimulation();
+            }
+
+            createProductionChart() {
+                const ctx = document.getElementById('production-chart').getContext('2d');
+                
+                this.charts.production = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [
+                            {
+                                label: 'H₂ Production (L/h)',
+                                data: [],
+                                borderColor: '#4caf50',
+                                backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                                borderWidth: 2,
+                                fill: true
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { position: 'top' } },
+                        scales: {
+                            x: { title: { display: true, text: 'Time' } },
+                            y: { beginAtZero: true, title: { display: true, text: 'L/h' } }
+                        }
+                    }
+                });
+            }
+
+            startDataSimulation() {
+                setInterval(() => {
+                    const now = new Date();
+                    const timestamp = now.toLocaleTimeString();
+                    const production = 25 + Math.random() * 10;
+                    
+                    this.updateChartData('production', timestamp, [production]);
+                }, 2000);
+            }
+
+            updateChartData(chartName, label, data) {
+                const chart = this.charts[chartName];
+                if (!chart) return;
+
+                chart.data.labels.push(label);
+                data.forEach((value, index) => {
+                    chart.data.datasets[index].data.push(value);
+                });
+
+                if (chart.data.labels.length > 20) {
+                    chart.data.labels.shift();
+                    chart.data.datasets.forEach(dataset => dataset.data.shift());
+                }
+
+                chart.update('none');
+            }
+        }
+
+        // Initialize everything when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            window.mqttClient = new MQTTClient();
+            window.neuralMPC = new NeuralMPC();
+            window.charts = new ChartManager();
+        });
+    </script>
+</body>
+</html>
